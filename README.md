@@ -235,7 +235,6 @@ The core of DataSense AI is a team of specialized agents, orchestrated by LangGr
 - [ ] Multi-dataset querying and joins.
 - [ ] Persistent storage options (e.g., PostgreSQL).
 - [ ] User authentication and saved history.
-- [ ] More advanced chart types (scatter plots, heatmaps).
 
 ## 🤝 Contributing
 Contributions are welcome! Please Fork → Branch → Commit → Pull Request.
