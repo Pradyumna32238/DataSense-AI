@@ -4,7 +4,7 @@ import json
 import logging
 import numpy as np
 import faiss
-from sentence_transformers import SentenceTransformer
+from .embedding_service import get_embedding_model
 import re
 
 logger = logging.getLogger(__name__)
@@ -32,40 +32,33 @@ def _extract_keywords(query: str) -> set:
     return set(numerical_keywords + textual_keywords)
 
 class SemanticCache:
-    def __init__(self, model_name='all-MiniLM-L6-v2', embedding_dim=384, similarity_threshold=0.90):
+    def __init__(self, embedding_dim=384, similarity_threshold=0.90):
         logger.info("Initializing Semantic Cache...")
-        self.model = SentenceTransformer(model_name)
         self.embedding_dim = embedding_dim
-        # Main index and storage for all entries
         self.index = faiss.IndexFlatL2(self.embedding_dim)
         self.entries = []
         self.similarity_threshold = similarity_threshold
-        logger.info("Semantic Cache initialized.")
+        logger.info("Semantic Cache configured and ready.")
 
     def add(self, query: str, response: dict):
         """Adds a query and its response to the semantic cache."""
-        embedding = self.model.encode([query])[0]
+        model = get_embedding_model()
+        embedding = model.encode([query])[0]
         keywords = _extract_keywords(query)
-        
-        # Store the original index position along with the entry
-        entry_index = len(self.entries)
         
         self.index.add(np.array([embedding]))
         self.entries.append({"query": query, "response": response, "keywords": keywords, "embedding": embedding})
         logger.info(f"Added to semantic cache: '{query}' with keywords {keywords}")
 
-    def search(self, query: str) :
+    def search(self, query: str):
         """
         Searches for a semantically similar query in the cache using a hybrid approach.
-        1. Filters by numerical keywords.
-        2. Performs semantic search on the filtered candidates.
         """
         if not self.entries:
             return None
 
         query_keywords = _extract_keywords(query)
         
-        # 1. Keyword Filtering: Find candidates that share at least one keyword.
         candidate_indices = [
             i for i, entry in enumerate(self.entries)
             if query_keywords.intersection(entry["keywords"])
@@ -77,30 +70,29 @@ class SemanticCache:
 
         logger.info(f"Found {len(candidate_indices)} candidates with keywords {query_keywords} for query: '{query}'")
 
-        # 2. Semantic Search on Candidates
         candidate_embeddings = np.array([self.entries[i]["embedding"] for i in candidate_indices])
         
-        # Build a temporary index for the candidates
         temp_index = faiss.IndexFlatL2(self.embedding_dim)
         temp_index.add(candidate_embeddings)
 
-        query_embedding = self.model.encode([query])[0]
+        model = get_embedding_model()
+        query_embedding = model.encode([query])[0]
         distances, indices = temp_index.search(np.array([query_embedding]), 1)
 
         if len(indices) > 0:
-            # The index from temp_index corresponds to the position in the candidate list
             best_candidate_pos = indices[0][0]
-            # Get the original index from our main entries list
             original_index = candidate_indices[best_candidate_pos]
             
             distance = distances[0][0]
             similarity = 1 / (1 + distance)
 
-            if similarity >= self.similarity_threshold:
-                logger.info(f"Hybrid cache hit for query: '{query}' with similarity {similarity:.2f}")
-                return self.entries[original_index]["response"]
-
-        logger.info(f"Hybrid cache miss (semantic threshold not met) for query: {query}")
+            if similarity > self.similarity_threshold:
+                cached_entry = self.entries[original_index]
+                logger.info(f"Hybrid semantic cache hit for query: '{query}' with similarity {similarity:.4f}. Found similar query: '{cached_entry['query']}'")
+                return cached_entry['response']
+            else:
+                logger.info(f"Hybrid cache miss for query: '{query}'. Best match similarity {similarity:.4f} is below threshold {self.similarity_threshold}.")
+        
         return None
 
 class Cache:
