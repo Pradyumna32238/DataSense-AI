@@ -1,4 +1,4 @@
-
+import os
 from flask import Flask
 from api.routes.main import main_bp
 from config import setup_logging
